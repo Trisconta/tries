@@ -139,9 +139,12 @@ class DirectoryScanner:
         for item in sets:
             # Exclude dots if needed
             last = item.parts[-1]
-            if last.startswith(".") and self._exclude_dots:
-                continue
             ori = str(item)
+            if self._exclude_dots:
+                if last.startswith(".") or (
+                    str_exclusion(item.parts)
+                ):
+                    continue
             try:
                 stats = item.stat()
             except (PermissionError, OSError):
@@ -195,6 +198,19 @@ class DirectoryScanner:
         else:
             astr = f"{item['size']}"
         return astr
+
+def str_exclusion(alist):
+    """ Exclusion from a string or list. """
+    def in_exclude(astr):
+        there = astr.startswith(
+            (
+                ".",
+                "__pycache__",
+            )
+        )
+        return there
+    there = any(in_exclude(s) for s in alist)
+    return there
 
 
 if __name__ == "__main__":
