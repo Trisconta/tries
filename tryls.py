@@ -20,7 +20,9 @@ def main():
     # Check if a path was provided as a command-line argument
     tup = do_script(sys.argv[1:])
     _, scanner = tup
+    myfile = __file__
     if scanner is None:
+        print(f"Invalid usage: {os.path.realpath(myfile)}")
         sys.exit(1)
     show_errors(scanner)
     sys.exit(0)
