@@ -7,6 +7,7 @@ A simple listing script.
 
 import os
 import sys
+import stat
 import time
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,7 @@ def usage():
 Options are:
    -v			Verbose (or more verbose).
    --no-sorts		Do not sort files.
+   --by-name		Sort by name (instead of modification time).
    --no-dots		Do not show files starting with '.'
 """)
     sys.exit(0)
@@ -47,6 +49,7 @@ def do_script(args):
     opts = {
         "verbose": 0,
         "sort": do_sort,
+        "byname": False,
         "dot-files": not no_dots,
     }
     param = args
@@ -57,6 +60,10 @@ def do_script(args):
             continue
         if param[0] in ("--no-sort",):
             opts["sort"] = False
+            del param[0]
+            continue
+        if param[0] in ("--by-name",):
+            opts["byname"] = True
             del param[0]
             continue
         if param[0] in ("--no-dots",):
@@ -89,10 +96,11 @@ def do_scans(targets, opts: dict) -> tuple:
                 print(target, ":")
         scanner = DirectoryScanner(
             SwabName(target).path,
-            verbose=verbose,
+            verbose=0 if verbose <= 0 else verbose - 1,
             sort=do_sort,
             dot_files=dot_files,
         )
+        scanner.set_byname(opts.get("byname", False))
         isok, msg = scanner.scan()
         lines += scanner.display()
         if not isok:
@@ -145,13 +153,14 @@ class DirectoryScanner:
     date_format = '%Y-%m-%d %H:%M:%S'
     default_verbose = DEF_VERBOSE
 
-    def __init__(self, target_path=None, verbose=None, sort=True, dot_files=True):
+    def __init__(self, target_path=None, verbose=None, sort=True, byname=False, dot_files=True):
         """ Initializer. """
-        self.do_sort = sort	# Sorts automatically by modification time
+        self.verbose = DirectoryScanner.default_verbose if verbose is None else int(verbose)
+        self.do_sort, self._byname = (sort or byname), byname
         self._path = target_path
         self._exclude_dots = not dot_files
-        self.verbose = DirectoryScanner.default_verbose if verbose is None else int(verbose)
         self._style, self.errors = "", []
+        assert self.verbose >= 0, f"Invalid verbose level: {verbose}"
         # Fallback to current working directory if no path is provided
         path = Path(target_path) if target_path else Path.cwd()
         if target_path is None:
@@ -164,6 +173,14 @@ class DirectoryScanner:
                 path = Path(target_path[:-1])
         self.target_path = path
         self.results = []
+
+    def set_byname(self, do_sort=True):
+        """Sets sorting by name (string)."""
+        assert isinstance(do_sort, bool), "set_byname()"
+        if do_sort:
+            self.do_sort = True
+        self._byname = do_sort
+        return do_sort
 
     def scan(self):
         """ Recursively scans the target path for all files and directories."""
@@ -211,19 +228,26 @@ class DirectoryScanner:
                 'mtime': stats.st_mtime,
                 'size': stats.st_size,
                 'is_dir': item.is_dir(),
-                'is_symlink': item.is_symlink(),
+                'is_symlink': item.is_symlink() or item.is_junction(),
                 'lux': lux,
                 'tux': tux,
                 'dir_stat': None if lux == "f." else is_accessible_dir(item)
             }
             self.results.append(dct)
         if self.do_sort:
-            self.sort_by_mtime()
+            if self._byname:
+                self.sort_by_name()
+            else:
+                self.sort_by_mtime()
         return True, ""
 
     def sort_by_mtime(self):
         """Sorts gathered results by modification time (oldest first)."""
         self.results.sort(key=lambda x: x['mtime'])
+
+    def sort_by_name(self):
+        """Sorts gathered results by name."""
+        self.results.sort(key=lambda x: x['name'])
 
     def display(self):
         """ Prints the results in a format similar to 'ls -lG'.
@@ -280,6 +304,14 @@ def is_accessible_dir(path: Path) -> bool:
         next(path.iterdir(), None)
         return True
     except PermissionError:
+        return False
+
+
+def is_junction(path: Path) -> bool:
+    try:
+        stt = os.lstat(path)
+        return bool(stt.st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT)
+    except Exception:
         return False
 
 

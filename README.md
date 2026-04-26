@@ -29,4 +29,4 @@ Use also in Windows the same way.
 
 ## Limitations
 
-In Windows it does not yet detect junctions.
+Does not detect loops for `rglob`.
