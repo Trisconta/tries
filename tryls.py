@@ -80,8 +80,8 @@ def do_scans(targets, opts: dict) -> tuple:
     lines = 0
     for target in a_set:
         a_pre = "\n" if lines else ""
-        if verbose > 0 or len(a_set) > 1:
-            if verbose > 0 and target is not None:
+        if (verbose > 0 or len(a_set) > 1) and target is not None:
+            if verbose > 0:
                 print(
                     a_pre + os.path.realpath(target) + ":",
                 )
