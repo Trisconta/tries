@@ -89,6 +89,7 @@ def do_scans(targets, opts: dict) -> tuple:
                 print(target, ":")
         scanner = DirectoryScanner(
             SwabName(target).path,
+            verbose=verbose,
             sort=do_sort,
             dot_files=dot_files,
         )
@@ -144,12 +145,12 @@ class DirectoryScanner:
     date_format = '%Y-%m-%d %H:%M:%S'
     default_verbose = DEF_VERBOSE
 
-    def __init__(self, target_path=None, sort=True, dot_files=True):
+    def __init__(self, target_path=None, verbose=None, sort=True, dot_files=True):
         """ Initializer. """
         self.do_sort = sort	# Sorts automatically by modification time
         self._path = target_path
         self._exclude_dots = not dot_files
-        self.verbose = DirectoryScanner.default_verbose
+        self.verbose = DirectoryScanner.default_verbose if verbose is None else int(verbose)
         self._style, self.errors = "", []
         # Fallback to current working directory if no path is provided
         path = Path(target_path) if target_path else Path.cwd()
@@ -176,6 +177,7 @@ class DirectoryScanner:
             self.errors = [f"Error: Path '{self.target_path}' does not exist."]
             return False, self.errors[0]
         # Use rglob("*") for recursive scanning of all items
+        myiter = None
         if style:
             if style in ("@",):
                 sets = self.target_path.glob("*")
@@ -202,14 +204,17 @@ class DirectoryScanner:
             shown = ori.replace("\\", "/")
             if shown.startswith(self._stt):
                 shown = shown[len(self._stt):]
-            tux = "d." if item.is_dir() else "f."
-            tux += str(time)
+            lux = "d." if item.is_dir() else "f."
+            tux = lux + str(time)
             dct = {
                 'name': shown,
                 'mtime': stats.st_mtime,
                 'size': stats.st_size,
                 'is_dir': item.is_dir(),
+                'is_symlink': item.is_symlink(),
+                'lux': lux,
                 'tux': tux,
+                'dir_stat': None if lux == "f." else is_accessible_dir(item)
             }
             self.results.append(dct)
         if self.do_sort:
@@ -239,7 +244,12 @@ class DirectoryScanner:
         """ Returns a string from the name. """
         iso_fmt = DirectoryScanner.date_format
         formatted_time = datetime.fromtimestamp(item['mtime']).strftime(iso_fmt)
-        size_label = "<DIR>" if item['is_dir'] else DirectoryScanner._sized(item)
+        if item['dir_stat'] == True:
+            size_label = "<DIR{}>".format("-LINK" if item['is_symlink'] else "")
+        elif item['dir_stat'] == False:
+            size_label = "<DIR.>"
+        else:
+            size_label = DirectoryScanner._sized(item)
         return f"{formatted_time:<20} {size_label:>12} {item['name']}"
 
     @staticmethod
@@ -263,6 +273,14 @@ def str_exclusion(alist):
         return there
     there = any(in_exclude(s) for s in alist)
     return there
+
+
+def is_accessible_dir(path: Path) -> bool:
+    try:
+        next(path.iterdir(), None)
+        return True
+    except PermissionError:
+        return False
 
 
 if __name__ == "__main__":
