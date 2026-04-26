@@ -11,6 +11,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# pylint: disable=missing-function-docstring
+
 DEF_VERBOSE = 0
 
 
@@ -19,21 +21,42 @@ def main():
     """
     # Check if a path was provided as a command-line argument
     tup = do_script(sys.argv[1:])
-    _, scanner = tup
-    myfile = __file__
-    if scanner is None:
-        print(f"Invalid usage: {os.path.realpath(myfile)}")
-        sys.exit(1)
-    show_errors(scanner)
+    _, scanners = tup
+    if scanners is None:
+        usage()
+    for scanner in scanners:
+        show_errors(scanner)
     sys.exit(0)
+
+
+def usage():
+    myfile = __file__
+    print(f"""{os.path.realpath(myfile)} [options] [path1 ...[path2]]
+
+Options are:
+   -v			Verbose (or more verbose).
+   --no-sorts		Do not sort files.
+   --no-dots		Do not show files starting with '.'
+""")
+    sys.exit(0)
+
 
 def do_script(args):
     """ Main script! """
     do_sort, no_dots = True, False
+    opts = {
+        "verbose": 0,
+        "sort": do_sort,
+        "dot-files": not no_dots,
+    }
     param = args
-    while param and param[0].startswith("--"):
+    while param and param[0].startswith("-"):
+        if param[0] in ("-v", "--verbose"):
+            opts["verbose"] += 1
+            del param[0]
+            continue
         if param[0] in ("--no-sort",):
-            do_sort = False
+            opts["sort"] = False
             del param[0]
             continue
         if param[0] in ("--no-dots",):
@@ -41,16 +64,41 @@ def do_script(args):
             del param[0]
             continue
         return False, None
-    target = param[0] if param else None
-    scanner = DirectoryScanner(
-        SwabName(target).path,
-        sort=do_sort,
-        dot_files=not no_dots,
-    )
-    #print(f"Scanning: {scanner.target_path}\n")
-    isok, msg = scanner.scan()
-    scanner.display()
-    return isok, scanner
+    targets = param if param else None
+    isok, scans = do_scans(targets, opts)
+    return isok, scans
+
+
+def do_scans(targets, opts: dict) -> tuple:
+    """ Do one path, or several.
+    """
+    scans = []
+    allok = True
+    verbose = opts.get("verbose", 0)
+    do_sort, dot_files = opts.get("sort", True), opts.get("dot-files", True)
+    a_set = [None] if targets is None else targets
+    lines = 0
+    for target in a_set:
+        a_pre = "\n" if lines else ""
+        if verbose > 0 or len(a_set) > 1:
+            if verbose > 0:
+                print(
+                    a_pre + os.path.realpath(target) + ":",
+                )
+            else:
+                print(target, ":")
+        scanner = DirectoryScanner(
+            SwabName(target).path,
+            sort=do_sort,
+            dot_files=dot_files,
+        )
+        isok, msg = scanner.scan()
+        lines += scanner.display()
+        if not isok:
+            allok = False
+        scans.append(scanner)
+    return allok, scans
+
 
 def show_errors(scanner):
     if not scanner.errors:
@@ -137,7 +185,6 @@ class DirectoryScanner:
             sets = self.target_path.rglob("*")
         assert sets is not None, f"Wrong doing: {self._path}"
         for item in sets:
-            # Exclude dots if needed
             last = item.parts[-1]
             ori = str(item)
             if self._exclude_dots:
@@ -179,9 +226,14 @@ class DirectoryScanner:
         if self.verbose > 0:
             print(f"{'MODIFIED TIME':<20} {'SIZE (Bytes)':>12} {'PATH'}")
             print("-" * 76)
+            alen = 2
+        else:
+            alen = 0
         for item in self.results:
             astr = self._formatted_item(item)
             print(astr)
+            alen += 1
+        return alen
 
     def _formatted_item(self, item):
         """ Returns a string from the name. """
