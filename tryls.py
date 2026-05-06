@@ -11,6 +11,7 @@ import stat
 import time
 from datetime import datetime
 from pathlib import Path
+import unicodedata
 
 # pylint: disable=missing-function-docstring
 
@@ -36,6 +37,7 @@ def usage():
 
 Options are:
    -v			Verbose (or more verbose).
+   -u			Any utf-8 charset is displayed.
    --no-sorts		Do not sort files.
    --by-name		Sort by name (instead of modification time).
    --no-dots		Do not show files starting with '.'
@@ -51,11 +53,16 @@ def do_script(args):
         "sort": do_sort,
         "byname": False,
         "dot-files": not no_dots,
+        "anychar": False,
     }
     param = args
     while param and param[0].startswith("-"):
         if param[0] in ("-v", "--verbose"):
             opts["verbose"] += 1
+            del param[0]
+            continue
+        if param[0] in (("-u", "--any-charset")):
+            opts["anychar"] = True
             del param[0]
             continue
         if param[0] in ("--no-sort",):
@@ -82,6 +89,7 @@ def do_scans(targets, opts: dict) -> tuple:
     scans = []
     allok = True
     verbose = opts.get("verbose", 0)
+    anychar = opts.get("anychar", False)
     do_sort, dot_files = opts.get("sort", True), opts.get("dot-files", True)
     a_set = [None] if targets is None else targets
     lines = 0
@@ -100,6 +108,7 @@ def do_scans(targets, opts: dict) -> tuple:
             sort=do_sort,
             dot_files=dot_files,
         )
+        scanner.set_charset("utf-8" if anychar else "ascii")
         scanner.set_byname(opts.get("byname", False))
         isok, msg = scanner.scan()
         lines += scanner.display()
@@ -160,6 +169,7 @@ class DirectoryScanner:
         self._path = target_path
         self._exclude_dots = not dot_files
         self._style, self.errors = "", []
+        self._char7ascii = False
         assert self.verbose >= 0, f"Invalid verbose level: {verbose}"
         # Fallback to current working directory if no path is provided
         path = Path(target_path) if target_path else Path.cwd()
@@ -181,6 +191,15 @@ class DirectoryScanner:
             self.do_sort = True
         self._byname = do_sort
         return do_sort
+
+    def set_charset(self, charsetname):
+        if charsetname == "ascii":
+            self._char7ascii = True
+        elif charsetname == "utf-8":
+            self._char7ascii = False
+        else:
+            return False
+        return True
 
     def scan(self):
         """ Recursively scans the target path for all files and directories."""
@@ -260,9 +279,16 @@ class DirectoryScanner:
             alen = 0
         for item in self.results:
             astr = self._formatted_item(item)
-            print(astr)
+            self._dump(astr)
             alen += 1
         return alen
+
+    def _dump(self, astr):
+        if self._char7ascii:
+            text = unicodedata.normalize("NFC", astr)
+        else:
+            text = astr
+        print(text)
 
     def _formatted_item(self, item):
         """ Returns a string from the name. """
