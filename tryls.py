@@ -40,19 +40,19 @@ Options are:
    -u			Any utf-8 charset is displayed.
    --no-sorts		Do not sort files.
    --by-name		Sort by name (instead of modification time).
-   --no-dots		Do not show files starting with '.'
+   --show-dots		Show files starting with '.' (or '-a')
 """)
     sys.exit(0)
 
 
 def do_script(args):
     """ Main script! """
-    do_sort, no_dots = True, False
+    do_sort, show_dots = True, False
     opts = {
         "verbose": 0,
         "sort": do_sort,
         "byname": False,
-        "dot-files": not no_dots,
+        "dot-files": show_dots,
         "anychar": False,
     }
     param = args
@@ -73,8 +73,11 @@ def do_script(args):
             opts["byname"] = True
             del param[0]
             continue
-        if param[0] in ("--no-dots",):
-            no_dots = True
+        if param[0] in ("-a", "--show-dots",):
+            opts["dot-files"] = True
+            if show_dots:
+                return False, None
+            show_dots = True
             del param[0]
             continue
         return False, None
@@ -212,6 +215,8 @@ class DirectoryScanner:
         if not self.target_path.exists():
             self.errors = [f"Error: Path '{self.target_path}' does not exist."]
             return False, self.errors[0]
+        if self._exclude_dots and self.target_path.name.startswith("."):
+            return True, ""
         # Use rglob("*") for recursive scanning of all items
         myiter = None
         if style:
@@ -229,6 +234,7 @@ class DirectoryScanner:
                 if last.startswith(".") or (
                     str_exclusion(item.parts)
                 ):
+                    #print("DBG:", "Excluded", [last], [item.parts])
                     continue
             try:
                 stats = item.stat()
