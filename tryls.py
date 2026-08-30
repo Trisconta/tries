@@ -18,19 +18,6 @@ import unicodedata
 DEF_VERBOSE = 0
 
 
-def main():
-    """ Main entry point that handles arguments and coordinates the scan.
-    """
-    # Check if a path was provided as a command-line argument
-    tup = do_script(sys.argv[1:])
-    _, scanners = tup
-    if scanners is None:
-        usage()
-    for scanner in scanners:
-        show_errors(scanner)
-    sys.exit(0)
-
-
 def usage():
     myfile = __file__
     print(f"""{os.path.realpath(myfile)} [options] [path1 ...[path2]]
@@ -45,6 +32,19 @@ Options are:
     sys.exit(0)
 
 
+def main():
+    """ Main entry point that handles arguments and coordinates the scan.
+    """
+    # Check if a path was provided as a command-line argument
+    tup = do_script(sys.argv[1:])
+    _, scanners = tup
+    if scanners is None:
+        usage()
+    for scanner in scanners:
+        show_errors(scanner)
+    sys.exit(0)
+
+
 def do_script(args):
     """ Main script! """
     do_sort, show_dots = True, False
@@ -53,6 +53,7 @@ def do_script(args):
         "sort": do_sort,
         "byname": False,
         "dot-files": show_dots,
+        "own-dir": True,	# Shows always own dir when requested to
         "anychar": False,
     }
     param = args
@@ -113,11 +114,14 @@ def do_scans(targets, opts: dict) -> tuple:
         )
         scanner.set_charset("utf-8" if anychar else "ascii")
         scanner.set_byname(opts.get("byname", False))
+        scanner.set_show_own_dir(opts["own-dir"])
         isok, msg = scanner.scan()
         lines += scanner.display()
         if not isok:
             allok = False
         scans.append(scanner)
+        if verbose >= 3:
+            print("\n".join(scanner.excluded))
     return allok, scans
 
 
@@ -159,7 +163,30 @@ class SwabName:
         return there
 
 
-class DirectoryScanner:
+class PathSearch:
+    """ Path Search and Exclusion. """
+    gen_dot_exclude = False
+
+    def __init__(self, dot_files):
+        self.excluded = []
+        self._exclude_dots = not dot_files
+        self._show_own_dir = True
+
+    def str_exclusion(self, alist, last):
+        """ Exclusion from a string or list. """
+        def in_exclude(astr):
+            there = astr.startswith(
+                (
+                    ".",
+                    "__pycache__",
+                )
+            )
+            return there
+        there = any(in_exclude(s) for s in alist)
+        return there
+
+
+class DirectoryScanner(PathSearch):
     """ Class to handle recursive directory scanning and metadata collection.
     """
     date_format = '%Y-%m-%d %H:%M:%S'
@@ -170,7 +197,7 @@ class DirectoryScanner:
         self.verbose = DirectoryScanner.default_verbose if verbose is None else int(verbose)
         self.do_sort, self._byname = (sort or byname), byname
         self._path = target_path
-        self._exclude_dots = not dot_files
+        super().__init__(dot_files)
         self._style, self.errors = "", []
         self._char7ascii = False
         assert self.verbose >= 0, f"Invalid verbose level: {verbose}"
@@ -204,6 +231,9 @@ class DirectoryScanner:
             return False
         return True
 
+    def set_show_own_dir(self, own):
+        self._show_own_dir = own
+
     def scan(self):
         """ Recursively scans the target path for all files and directories."""
         self.errors = []
@@ -215,8 +245,9 @@ class DirectoryScanner:
         if not self.target_path.exists():
             self.errors = [f"Error: Path '{self.target_path}' does not exist."]
             return False, self.errors[0]
-        if self._exclude_dots and self.target_path.name.startswith("."):
-            return True, ""
+        if not self._show_own_dir:
+            if self._exclude_dots and self.target_path.name.startswith("."):
+                return True, ""
         # Use rglob("*") for recursive scanning of all items
         myiter = None
         if style:
@@ -231,10 +262,10 @@ class DirectoryScanner:
             last = item.parts[-1]
             ori = str(item)
             if self._exclude_dots:
-                if last.startswith(".") or (
-                    str_exclusion(item.parts)
-                ):
-                    #print("DBG:", "Excluded", [last], [item.parts])
+                if last.startswith(".") or self.str_exclusion(item.parts, last):
+                    self.excluded.append(
+                        f"Excluded: {str(self.target_path)}, last={[last]}, {ori}",
+                    )
                     continue
             try:
                 stats = item.stat()
@@ -316,19 +347,6 @@ class DirectoryScanner:
         else:
             astr = f"{item['size']}"
         return astr
-
-def str_exclusion(alist):
-    """ Exclusion from a string or list. """
-    def in_exclude(astr):
-        there = astr.startswith(
-            (
-                ".",
-                "__pycache__",
-            )
-        )
-        return there
-    there = any(in_exclude(s) for s in alist)
-    return there
 
 
 def is_accessible_dir(path: Path) -> bool:
